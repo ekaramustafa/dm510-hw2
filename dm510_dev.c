@@ -48,7 +48,7 @@ static struct file_operations dm510_fops = {
 	.write   = dm510_write,
 	.open    = dm510_open,
 	.release = dm510_release,
-        .unlocked_ioctl   = dm510_ioctl
+    .unlocked_ioctl   = dm510_ioctl
 };
 
 
@@ -101,18 +101,20 @@ int dm510_init_module( void ) {
         global_buffers[i].buffer = kmalloc(BUFFER_SIZE * sizeof(char), GFP_KERNEL);
  
         if(global_buffers[i].buffer == NULL){
+            dm510_cleanup_module();
             printk(KERN_ERR "Buffer_%d cannot be allocated.", i);
             return -ENOMEM;
         }
         global_buffers[i].wp = global_buffers[i].rp = global_buffers[i].buffer;
-	global_buffers[i].size = BUFFER_SIZE;
+	    global_buffers[i].size = BUFFER_SIZE;
 
     }
        
     dm_pipe_devices = kmalloc(DEVICE_COUNT * sizeof(struct dm_pipe), GFP_KERNEL);
     
     if(dm_pipe_devices == NULL){
-        unregister_chrdev_region(device_devno, DEVICE_COUNT);
+        //unregister_chrdev_region(device_devno, DEVICE_COUNT);
+        dm510_cleanup_module();
         printk(KERN_ERR "Memory cannot be allocated for dm_devices \n");
         return -ENOMEM;
     }
@@ -136,7 +138,6 @@ int dm510_init_module( void ) {
 /* Called when module is unloaded */
 void dm510_cleanup_module( void ) {
 
-	/* clean up code belongs here */
     int i;
 
     for(i =0;i< BUFFER_COUNT;i++){
@@ -291,7 +292,7 @@ static ssize_t dm510_write( struct file *filp,
         
         mutex_unlock(&dev->mutex);
         if(filp->f_flags & O_NONBLOCK){
-            printk(KERN_ERR "File-pointer is blocked\n");
+            printk(KERN_ERR "File is in O_NONBLOCK mode\n");
             return -EAGAIN;
         }
         if(wait_event_interruptible(dev->outq,
@@ -361,11 +362,11 @@ long dm510_ioctl(
             max_readers = arg;
             break;
 	}
-	return 0; //has to be changed
+	return 0; 
 }
 
 module_init( dm510_init_module ); //this call is mandatory
 module_exit( dm510_cleanup_module ); //this call is mandatory 
 
-MODULE_AUTHOR( "...Ebubekir Karamustafa." );
+MODULE_AUTHOR( "...Ebubekir Karamustafa and Ivan Vega." );
 MODULE_LICENSE( "GPL" );
