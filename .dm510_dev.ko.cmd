@@ -1,0 +1,1 @@
+savedcmd_/home/ebu/dm510/assignment2/dm510_dev.ko := ld -r -m elf_x86_64 -z noexecstack --build-id=sha1  -T scripts/module.lds -o /home/ebu/dm510/assignment2/dm510_dev.ko /home/ebu/dm510/assignment2/dm510_dev.o /home/ebu/dm510/assignment2/dm510_dev.mod.o;  true
