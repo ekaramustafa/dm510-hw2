@@ -53,7 +53,7 @@ struct dm_pipe {
     struct buffer *read_buffer;
     struct buffer *write_buffer;
     int nreaders, nwriters;
-    struct fasync_struct *async_queue;
+    // struct fasync_struct *async_queue;
     struct mutex mutex;
     struct cdev cdev;
 };

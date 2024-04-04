@@ -9,6 +9,7 @@ static struct buffer global_buffers[BUFFER_COUNT];
 
 
 static void dm_pipe_device_setup( struct dm_pipe *dev, int index ){
+    // TODO: Can there be a deadlock if one gets added and tries to be accesed before the other one?
     int err, devno = device_devno + index;
     cdev_init(&dev->cdev, &dm510_fops);
     dev->cdev.owner = THIS_MODULE;
@@ -83,7 +84,7 @@ int dm510_init_module( void ) {
     printk(KERN_INFO "Devices are allocated, being initialized");
 
     for(i = 0; i < DEVICE_COUNT; i++){
-        init_waitqueue_head(&(dm_pipe_devices[i].inq));
+        init_waitqueue_head(&(dm_pipe_devices[i].inq)); // TODO: Should we check for errors here ?
         init_waitqueue_head(&(dm_pipe_devices[i].outq));
         mutex_init(&dm_pipe_devices[i].mutex);
         dm_pipe_devices[i].write_buffer = global_buffers + ((i + 1) % BUFFER_COUNT);
@@ -131,15 +132,13 @@ static int dm510_open( struct inode *inode, struct file *filp ) {
     }
 
     mutex_unlock(&dev->mutex);
-	return nonseekable_open(inode,filp);
+	return nonseekable_open(inode, filp);
 }
 
 
 /* Called when a process closes the device file. */
 static int dm510_release( struct inode *inode, struct file *filp ) {
     struct dm_pipe *dev = filp->private_data;
-    // Remove this filp from the asynchronously notified filp's
-    fasync_helper(-1, filp, 0, &dev->async_queue);
 	mutex_lock(&dev->mutex);
 
     if(filp->f_mode & FMODE_READ && dev->nreaders){
@@ -215,10 +214,12 @@ static ssize_t dm510_write(
     loff_t *f_pos /* The offset in the file           */
 )  {
     struct dm_pipe *dev = filp->private_data;
+
     if(mutex_lock_interruptible(&dev->mutex)){
         printk(KERN_ERR "Mutex lock is interrupted\n");
         return -ERESTARTSYS;
     }
+
     if(count > global_buffers->size){
         printk(KERN_ERR "Message is too long for the buffer\n");
         return -EMSGSIZE;
@@ -250,11 +251,6 @@ static ssize_t dm510_write(
     	wake_up_interruptible(&dm_pipe_devices[i].inq);
     }
 
-
-    if(dev->async_queue){
-       kill_fasync(&dev->async_queue, SIGIO, POLL_IN); 
-    }
-    
     mutex_unlock(&dev->mutex);
 	return count; //return number of bytes written
 }
