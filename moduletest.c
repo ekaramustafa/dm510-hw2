@@ -1,4 +1,4 @@
-/* Test program for 3rd mandatory assignment.
+/* Test program for 2nd mandatory assignment.
  *
  * A process writes ITS integers to /dev/dm510-0 while
  * another process read ITS integers from /dev/dm510-1.

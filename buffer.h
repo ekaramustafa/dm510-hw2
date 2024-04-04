@@ -13,7 +13,6 @@ struct buffer{
     char *buffer;
     size_t size;
     char *rp, *wp;
-    //struct mutex mutex;
 };
 
 size_t buffer_read(struct buffer *buf, char * seq, size_t size);

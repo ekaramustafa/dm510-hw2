@@ -19,8 +19,3 @@ mknod /dev/${device_prefix}1 c 255 1
 
 chgrp $group /dev/${device_prefix}[0-1]
 chmod $mode  /dev/${device_prefix}[0-1]
-
-
-
-
-

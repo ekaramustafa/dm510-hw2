@@ -2,9 +2,6 @@
 # Module Makefile for DM510 (2024)
 #
 
-# Change this if you keep your files elsewhere
-#
-
 ROOT = ..
 KERNELDIR = ${ROOT}/linux-6.6.9
 PWD = $(shell pwd)
@@ -18,7 +15,3 @@ modules:
 clean:
 	rm -rf *.o *~ core .depend .*.cmd *.ko *.mod.c .tmp_versions
 	
-
-
-
-
