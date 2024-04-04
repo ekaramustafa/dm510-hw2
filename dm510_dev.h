@@ -42,6 +42,12 @@ static struct file_operations dm510_fops = {
     .unlocked_ioctl   = dm510_ioctl
 };
 
+static int dm510_open( struct inode*, struct file* );
+static int dm510_release( struct inode*, struct file* );
+static ssize_t dm510_read( struct file*, char*, size_t, loff_t* );
+static ssize_t dm510_write( struct file*, const char*, size_t, loff_t* );
+long dm510_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+
 struct dm_pipe {
     wait_queue_head_t inq, outq;
     struct buffer *read_buffer;
@@ -51,9 +57,3 @@ struct dm_pipe {
     struct mutex mutex;
     struct cdev cdev;
 };
-
-static int dm510_open( struct inode*, struct file* );
-static int dm510_release( struct inode*, struct file* );
-static ssize_t dm510_read( struct file*, char*, size_t, loff_t* );
-static ssize_t dm510_write( struct file*, const char*, size_t, loff_t* );
-long dm510_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);

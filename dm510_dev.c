@@ -60,7 +60,8 @@ int dm510_init_module( void ) {
         global_buffers[i].buffer = kmalloc(BUFFER_SIZE * sizeof(char), GFP_KERNEL);
  
         if(global_buffers[i].buffer == NULL){
-            dm510_cleanup_module();
+            dm510_cleanup_module(); // Does not unregister the chrdev_region if dm_pipe_devices is NULL 
+            unregister_chrdev_region(device_devno, DEVICE_COUNT); 
             printk(KERN_ERR "Buffer_%d cannot be allocated.", i);
             return -ENOMEM;
         }
@@ -72,7 +73,8 @@ int dm510_init_module( void ) {
     dm_pipe_devices = kmalloc(DEVICE_COUNT * sizeof(struct dm_pipe), GFP_KERNEL);
     
     if(dm_pipe_devices == NULL){
-        dm510_cleanup_module();
+        dm510_cleanup_module(); // Does not unregister the chrdev_region if dm_pipe_devices is NULL
+        unregister_chrdev_region(device_devno, DEVICE_COUNT); 
         printk(KERN_ERR "Memory cannot be allocated for dm_devices \n");
         return -ENOMEM;
     }
