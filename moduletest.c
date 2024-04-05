@@ -58,7 +58,7 @@ int main(int argc, char *argv[])
 
     if (pid == 0) {
         fd = open("/dev/dm510-0", O_RDWR);
-	       perror("w open");
+	    perror("w open");
         for (i=0; i<ITS; i++) {
             val++;
             sum += val;

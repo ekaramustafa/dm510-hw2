@@ -62,7 +62,7 @@ int buffer_resize(struct buffer *buf, size_t size) {
     result = kmalloc(size * sizeof(*buf->buffer), GFP_KERNEL);
 
     if (!result){
-        printk(KERN_ERR "Error in memory allocation while resizing the buffer");
+        printk(KERN_ERR "Error in memory allocation while resizing the buffer\n");
         return -ENOMEM; // Return error code if memory allocation fails
 	}
     if (buf->wp == buf->rp) {

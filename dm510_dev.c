@@ -8,16 +8,18 @@ static struct dm_pipe *dm_pipe_devices;
 static struct buffer global_buffers[BUFFER_COUNT];
 
 
-static void dm_pipe_device_setup( struct dm_pipe *dev, int index ){
-    // TODO: Can there be a deadlock if one gets added and tries to be accesed before the other one?
+static int dm_pipe_device_setup( struct dm_pipe *dev, int index ){
     int err, devno = device_devno + index;
     cdev_init(&dev->cdev, &dm510_fops);
     dev->cdev.owner = THIS_MODULE;
     err = cdev_add(&dev->cdev, devno, 1);
 
     if(err){
-        printk(KERN_NOTICE "Error %d adding dm_pipe %d", err, index);
+        printk(KERN_NOTICE "Error %d adding dm_pipe %d\n", err, index);
+        return err;
     }
+
+    return 0;
 }
 
 
@@ -63,7 +65,7 @@ int dm510_init_module( void ) {
         if(global_buffers[i].buffer == NULL){
             dm510_cleanup_module(); // Does not unregister the chrdev_region if dm_pipe_devices is NULL 
             unregister_chrdev_region(device_devno, DEVICE_COUNT); 
-            printk(KERN_ERR "Buffer_%d cannot be allocated.", i);
+            printk(KERN_ERR "Buffer_%d cannot be allocated.\n", i);
             return -ENOMEM;
         }
 
@@ -81,15 +83,19 @@ int dm510_init_module( void ) {
     }
     
     memset(dm_pipe_devices, 0, DEVICE_COUNT * sizeof(struct dm_pipe));
-    printk(KERN_INFO "Devices are allocated, being initialized");
+    printk(KERN_INFO "Devices are allocated, being initialized\n");
 
     for(i = 0; i < DEVICE_COUNT; i++){
-        init_waitqueue_head(&(dm_pipe_devices[i].inq)); // TODO: Should we check for errors here ?
+        init_waitqueue_head(&(dm_pipe_devices[i].inq));
         init_waitqueue_head(&(dm_pipe_devices[i].outq));
         mutex_init(&dm_pipe_devices[i].mutex);
         dm_pipe_devices[i].write_buffer = global_buffers + ((i + 1) % BUFFER_COUNT);
         dm_pipe_devices[i].read_buffer = global_buffers + (i % BUFFER_COUNT);
-        dm_pipe_device_setup(dm_pipe_devices + i, i);
+        int err_pipe = dm_pipe_device_setup(dm_pipe_devices + i, i);
+        if(err_pipe != 0) {
+            dm510_cleanup_module();
+            return err_pipe;
+        }
     }
 
     return 0;
@@ -112,7 +118,7 @@ static int dm510_open( struct inode *inode, struct file *filp ) {
     if(filp->f_mode & FMODE_READ){
         if(dev->nreaders >= max_readers){
             mutex_unlock(&dev->mutex);
-            printk(KERN_ERR "The maximum number of possible readers reached, limit : %zu", max_readers);
+            printk(KERN_ERR "The maximum number of possible readers reached, limit : %zu\n", max_readers);
             return -ERESTARTSYS;
         }
         else{
@@ -123,7 +129,7 @@ static int dm510_open( struct inode *inode, struct file *filp ) {
     if(filp->f_mode & FMODE_WRITE){
         if(dev->nwriters >= 1){
             mutex_unlock(&dev->mutex);
-            printk(KERN_ERR "There is already one device writing.");
+            printk(KERN_ERR "There is already one device writing.\n");
             return -ERESTARTSYS;
         }
         else{
@@ -172,7 +178,7 @@ static ssize_t dm510_read(
         mutex_unlock(&dev->mutex);
 
         if(filp->f_flags & O_NONBLOCK){
-            printk(KERN_ERR "File-pointer blocked");
+            printk(KERN_ERR "The buffer is empty and the file is in O_NONBLOCK mode\n");
             return -EAGAIN;
         }
 
@@ -188,12 +194,14 @@ static ssize_t dm510_read(
     }
 
     count = buffer_read(dev->read_buffer, buf, count); 
-    mutex_unlock(&dev->mutex);
-    //wake_up_interruptible(&dev->outq);
-    for(int i = 0; i < DEVICE_COUNT; i++){
-    	wake_up_interruptible(&dm_pipe_devices[i].outq);
+
+    if(dev == dm_pipe_devices) {
+        wake_up_interruptible(&dm_pipe_devices[1].outq);
+    } else if(dev == dm_pipe_devices + 1) {
+        wake_up_interruptible(&dm_pipe_devices[0].outq);
     }
 
+    mutex_unlock(&dev->mutex); // TODO: This should be before the wake up or after?
 	return count; 
 }
 
@@ -222,19 +230,21 @@ static ssize_t dm510_write(
 
     if(count > global_buffers->size){
         printk(KERN_ERR "Message is too long for the buffer\n");
+        mutex_unlock(&dev->mutex);
         return -EMSGSIZE;
     }
+
+    printk(KERN_INFO "SPACEFREE: %d, COUNT: %ld\n", spacefree(dev->write_buffer), count);
 
     while(spacefree(dev->write_buffer) < count){
         mutex_unlock(&dev->mutex);
 
         if(filp->f_flags & O_NONBLOCK){
-            printk(KERN_ERR "File is in O_NONBLOCK mode\n");
+            printk(KERN_ERR "The buffer is full and the file is in O_NONBLOCK mode\n");
             return -EAGAIN;
         }
 
-        if(wait_event_interruptible(dev->outq,
-                    (spacefree(dev->write_buffer) >= count))){
+        if(wait_event_interruptible(dev->outq, (spacefree(dev->write_buffer) >= count))){
             printk(KERN_ERR "Writer is interrupted\n");
             return -EAGAIN;
         }
@@ -247,8 +257,10 @@ static ssize_t dm510_write(
 
     count = buffer_write(dev->write_buffer, (char *)buf, count);
 
-    for(int i = 0 ; i < DEVICE_COUNT ; i++){
-    	wake_up_interruptible(&dm_pipe_devices[i].inq);
+    if(dev == dm_pipe_devices) {
+        wake_up_interruptible(&dm_pipe_devices[1].inq);
+    } else if(dev == dm_pipe_devices + 1) {
+        wake_up_interruptible(&dm_pipe_devices[0].inq);
     }
 
     mutex_unlock(&dev->mutex);
@@ -262,40 +274,65 @@ long dm510_ioctl(
     unsigned int cmd,   /* command passed from the user */
     unsigned long arg   /* argument of the command */
 ) {
+    struct dm_pipe *dev = filp->private_data;
+
+    if(mutex_lock_interruptible(&dev->mutex)){
+        printk(KERN_ERR "Mutex lock is interrupted\n");
+        return -ERESTARTSYS;
+    }
+
 	printk(KERN_INFO "DM510: ioctl called.\n");
     switch(cmd){
-        case GET_BUFFER_SIZE:
+        case GET_BUFFER_SIZE: {
+            mutex_unlock(&dev->mutex);
             return global_buffers->size;
+        }
         
-       case SET_BUFFER_SIZE: {
+        case SET_BUFFER_SIZE: {
             unsigned long new_size = arg;
+
+            // Check for valid size
             if (new_size == 0 || new_size > BUFFER_SIZE){
                 printk(KERN_ERR "Invalid Buffer Size is provided %lu \n", new_size);
+                mutex_unlock(&dev->mutex);
+                return -EINVAL; // Invalid buffer size
             }
-            return -EINVAL; // Invalid buffer size
+
+            // Check for used space in the buffers
             for (int i = 0; i < BUFFER_COUNT; i++) {
                 int used_space = global_buffers[i].size - spacefree(&global_buffers[i]);
                 if (used_space > new_size) {
                     printk(KERN_ERR "Buffer(%d) has %d amount of used space, cannot be reduced to size %lu.\n", i, used_space, new_size);
+                    mutex_unlock(&dev->mutex);
                     return -EINVAL; // Cannot reduce buffer size
                 }
             }
+
+            // Resize the buffers
             for (int i = 0; i < BUFFER_COUNT; i++) {
-            	int result = buffer_resize(&global_buffers[i],new_size);
-            	if(result !=0){
+            	int result = buffer_resize(&global_buffers[i], new_size);
+            	if(result != 0){
+                    mutex_unlock(&dev->mutex);
             		return result;
             	}
             }
+
+            printk(KERN_INFO "%ld\n", sizeof(global_buffers->buffer));
             break;
         }
 
-       case GET_MAX_READER:
+        case GET_MAX_READER: {
+            mutex_unlock(&dev->mutex);
             return max_readers;
+        } 
         
-       case SET_MAX_READER:
+        case SET_MAX_READER: {
             max_readers = arg;
             break;
+        }
 	}
+
+    mutex_unlock(&dev->mutex);
 	return 0; 
 }
 
