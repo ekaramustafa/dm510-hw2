@@ -28,8 +28,23 @@
 //ioctl
 #define GET_BUFFER_SIZE 0
 #define SET_BUFFER_SIZE 1
-#define GET_MAX_READER 2
-#define SET_MAX_READER 3
+#define GET_MAX_READER 200
+#define SET_MAX_READER 201
+
+struct dm_pipe {
+    wait_queue_head_t inq, outq;
+    struct buffer *read_buffer;
+    struct buffer *write_buffer;
+    int nreaders, nwriters;
+    struct mutex mutex;
+    struct cdev cdev;
+};
+
+static int dm510_open( struct inode*, struct file* );
+static int dm510_release( struct inode*, struct file* );
+static ssize_t dm510_read( struct file*, char*, size_t, loff_t* );
+static ssize_t dm510_write( struct file*, const char*, size_t, loff_t* );
+long dm510_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
 
 /* file operations struct */
 static struct file_operations dm510_fops = {
@@ -39,19 +54,4 @@ static struct file_operations dm510_fops = {
 	.open    = dm510_open,
 	.release = dm510_release,
     .unlocked_ioctl   = dm510_ioctl
-};
-
-static int dm510_open( struct inode*, struct file* );
-static int dm510_release( struct inode*, struct file* );
-static ssize_t dm510_read( struct file*, char*, size_t, loff_t* );
-static ssize_t dm510_write( struct file*, const char*, size_t, loff_t* );
-long dm510_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
-
-struct dm_pipe {
-    wait_queue_head_t inq, outq;
-    struct buffer *read_buffer;
-    struct buffer *write_buffer;
-    int nreaders, nwriters;
-    struct mutex mutex;
-    struct cdev cdev;
 };

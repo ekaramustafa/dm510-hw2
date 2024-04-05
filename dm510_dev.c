@@ -195,13 +195,14 @@ static ssize_t dm510_read(
 
     count = buffer_read(dev->read_buffer, buf, count); 
 
+    mutex_unlock(&dev->mutex);
+
     if(dev == dm_pipe_devices) {
         wake_up_interruptible(&dm_pipe_devices[1].outq);
     } else if(dev == dm_pipe_devices + 1) {
         wake_up_interruptible(&dm_pipe_devices[0].outq);
     }
 
-    mutex_unlock(&dev->mutex); // TODO: This should be before the wake up or after?
 	return count; 
 }
 
@@ -234,13 +235,11 @@ static ssize_t dm510_write(
         return -EMSGSIZE;
     }
 
-    printk(KERN_INFO "SPACEFREE: %d, COUNT: %ld\n", spacefree(dev->write_buffer), count);
-
     while(spacefree(dev->write_buffer) < count){
         mutex_unlock(&dev->mutex);
 
         if(filp->f_flags & O_NONBLOCK){
-            printk(KERN_ERR "The buffer is full and the file is in O_NONBLOCK mode\n");
+            printk(KERN_ERR "The is not enough space and the file is in O_NONBLOCK mode\n");
             return -EAGAIN;
         }
 
@@ -257,13 +256,14 @@ static ssize_t dm510_write(
 
     count = buffer_write(dev->write_buffer, (char *)buf, count);
 
+    mutex_unlock(&dev->mutex);
+
     if(dev == dm_pipe_devices) {
         wake_up_interruptible(&dm_pipe_devices[1].inq);
     } else if(dev == dm_pipe_devices + 1) {
         wake_up_interruptible(&dm_pipe_devices[0].inq);
     }
 
-    mutex_unlock(&dev->mutex);
 	return count; //return number of bytes written
 }
 
@@ -317,7 +317,6 @@ long dm510_ioctl(
             	}
             }
 
-            printk(KERN_INFO "%ld\n", sizeof(global_buffers->buffer));
             break;
         }
 

@@ -48,7 +48,6 @@ size_t buffer_write(struct buffer *buf, char *seq, size_t size){
         buf->wp += to_write;
         bytes_written += to_write;
 
-
         if (buf->wp == buf->buffer + buf->size)
             buf->wp = buf->buffer;
     }
@@ -58,34 +57,32 @@ size_t buffer_write(struct buffer *buf, char *seq, size_t size){
 
 
 int buffer_resize(struct buffer *buf, size_t size) {
-    void * result;
-    result = kmalloc(size * sizeof(*buf->buffer), GFP_KERNEL);
+    void *new_buffer = kmalloc(size, GFP_KERNEL);
 
-    if (!result){
+    if (!new_buffer) {
         printk(KERN_ERR "Error in memory allocation while resizing the buffer\n");
         return -ENOMEM; // Return error code if memory allocation fails
-	}
-    if (buf->wp == buf->rp) {
-        // If write pointer and read pointer are equal, reset both to the beginning of the buffer
-        buf->wp = buf->rp = result;
-    } else if (buf->wp > buf->rp) {
-        // If write pointer is greater than read pointer, copy data accordingly
-        size_t data_size = buf->wp - buf->rp;
-        memcpy(result, buf->rp, data_size);
-        buf->wp = result + data_size;
-        buf->rp = result;
-    } else {
-        // If write pointer is less than read pointer, handle data wrapping around the buffer
-        size_t data_size = (buf->buffer + buf->size) - buf->rp;
-        memcpy(result, buf->rp, data_size);
-        buf->rp = result;
-        memcpy(buf->rp + data_size, buf->buffer, buf->wp - buf->buffer);
-        buf->wp = (buf->rp + data_size) + (buf->wp - buf->buffer);
     }
-    
-    // Update buffer pointer and free previous buffer
-    kfree(buf->buffer);
-    buf->buffer = result;
+
+    if (buf->rp <= buf->wp) {
+        size_t data_size = buf->wp - buf->rp;
+        memcpy(new_buffer, buf->rp, data_size);
+        buf->rp = new_buffer;
+        buf->wp = new_buffer + data_size;
+    } else {
+        size_t data_size_1 = buf->size - (buf->rp - buf->buffer);
+        size_t data_size_2 = buf->wp - buf->buffer;
+        
+        memcpy(new_buffer, buf->rp, data_size_1);
+        memcpy(new_buffer + data_size_1, buf->buffer, data_size_2);
+
+        buf->rp = new_buffer;
+        buf->wp = new_buffer + data_size_1 + data_size_2;
+    }
+
+    kfree(buf->buffer); // Free old buffer after data has been copied
+    buf->buffer = new_buffer;
+    buf->size = size;
 
     return 0; // Return success
 }

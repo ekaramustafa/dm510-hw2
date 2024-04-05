@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <sys/ioctl.h>
 #include <string.h>
+#include <sys/wait.h> 
 
 
 // TEST 1: Basic write and read from the same process to the different devices
@@ -35,16 +36,104 @@ int test_one() {
 }
 
 
-// TEST 2: When it is 
+// TEST 2: When the buffer is empty, make one process wait for another
+// one to write to it and then viceversa
 int test_two() {
-  int fd;
+  int fd_1, fd_2;
+  char wr_txt_1[20] = "Test number one ins";
+  char wr_txt_2[20] = "Test number two ins";
+  char read_txt_1[20], read_txt_2[20];
+  
+  int pid = fork();
 
-  return 0;
+  if(pid == 0) {
+    fd_1 = open("/dev/dm510-0", O_RDONLY);
+    read(fd_1, read_txt_1, 20);
+    close(fd_1);
+  } else {
+    fd_2 = open("/dev/dm510-1", O_WRONLY);
+    write(fd_2, wr_txt_1, 20);
+    close(fd_2);
+  }
+
+  if(pid == 0) {
+    fd_1 = open("/dev/dm510-0", O_WRONLY);
+    write(fd_1, wr_txt_2, 20);
+    close(fd_1);
+  } else {
+    fd_2 = open("/dev/dm510-1", O_RDONLY);
+    read(fd_2, read_txt_2, 20);
+    close(fd_2);
+  }
+
+  if(pid == 0) {
+    printf("\nTest 2. expected first result: %s\n", wr_txt_1);
+    printf("Test 2. first result: %s\n", read_txt_1);
+    exit(strcmp(wr_txt_1, read_txt_1));
+  } else {
+    int status;
+    wait(&status);
+
+    printf("Test 2. expected second result: %s\n", wr_txt_2);
+    printf("Test 2. second result: %s\n", read_txt_2);
+
+    if(WIFEXITED(status)) {
+      int status_code = WEXITSTATUS(status);
+      if(status_code == 0) {
+        return strcmp(wr_txt_2, read_txt_2);
+      }
+    }
+  }
+
+  return -1;
 }
 
 
-// TEST 3: 
+// TEST 3: Make multiple writes and reads to the two devices to see
+// the expected behavior
 int test_three() {
+  int fd;
+  char wr_txt[5] = "Test";
+  char read_txt[15], read_txt_1[10];
+
+  fd = open("/dev/dm510-0", O_WRONLY);
+  for(int i = 0; i < 3; i++) {
+    write(fd, wr_txt, strlen(wr_txt) + 1);
+    perror("write");
+  }
+  close(fd);
+
+  fd = open("/dev/dm510-1", O_RDWR);
+  read(fd, read_txt, 15);
+
+  for(int i = 0; i < 2; i++) {
+    write(fd, wr_txt, strlen(wr_txt) + 1);
+    perror("write");
+  }
+
+  close(fd);
+
+  fd = open("/dev/dm510-0", O_RDONLY);
+  read(fd, read_txt_1, 10);
+
+  close(fd);
+
+  printf("Test 3. first expected result: Test Test Test\n");
+  printf("Test 3. first result: ");
+  for(int i = 0; i < 3; i++) {
+    if(strcmp(read_txt + i * 5, "Test")) return -1;
+    printf("%s ", read_txt + i * 5);
+  }
+  printf("\n");
+
+  printf("Test 3. second expected result: Test Test\n");
+  printf("Test 3. second result: ");
+  for(int i = 0; i < 2; i++) {
+    if(strcmp(read_txt_1 + i * 5, "Test")) return -1;
+    printf("%s ", read_txt_1 + i * 5);
+  }
+  printf("\n");
+
   return 0;
 }
 
@@ -77,10 +166,9 @@ int test_four() {
 int test_five() {
   int fd;
   unsigned long buffer_size = 10;
-  char *read_txt = "test test";
+  char *txt = "test test";
 
   fd = open("/dev/dm510-0", O_WRONLY | O_NONBLOCK);
-  perror("open");
   errno = 0;
 
   // Change the buffer size
@@ -93,38 +181,30 @@ int test_five() {
   perror("get size ioctl");
   errno = 0;
 
+  printf("New buffer size: %d\n", size);
+
   // Fill up the buffer
-  write(fd, read_txt, buffer_size);
-  perror("write");
+  write(fd, txt, strlen(txt));
+  perror("first write");
   errno = 0;
 
   // Try to write again
-  write(fd, read_txt, buffer_size);
-  perror("write");
+  write(fd, txt, strlen(txt));
+  perror("second write");
   int err = errno;
   errno = 0;
 
   close(fd);
 
-  if(err != EAGAIN || size != 10) return -1;
+  if(err != EAGAIN || size != buffer_size) return -1;
 
   return 0;
 }
 
 
-// TEST 6: Change the buffer size to something smaller with ioctl,
-// fill it up and if the process tries to write again in BLOCKING
-// mode it will wait until the child process reads from the 
-// other device
+// TEST 6: Try to make the buffer size bigger 
+// and see the correct error
 int test_six() {
-  int fd;
-
-  return 0;
-}
-
-// TEST 7: Try to change the buffer size even bigger and see
-// the correct error
-int test_seven() {
   int fd;
   unsigned long buffer_size = 5000;
 
@@ -140,14 +220,17 @@ int test_seven() {
 
   close(fd);
 
+  printf("Test 6. expected result: %d\n", EINVAL);
+  printf("Test 6. result: %d\n", err);
+
   if(err != EINVAL) return -1;
 
   return 0;
 }
 
 
-// TEST 8: Set a different number of readers and retrieve it
-int test_eight() {
+// TEST 7: Set a different number of readers and retrieve it
+int test_seven() {
   int fd;
   unsigned long max_readers = 60;
 
@@ -156,23 +239,55 @@ int test_eight() {
   errno = 0;
 
   // Change the max number of readers
-  ioctl(fd, 3, max_readers);
+  ioctl(fd, 201, max_readers);
   perror("set max ioctl");
   errno = 0;
 
   // Get the max number of readers
-  int readers = ioctl(fd, 2);
+  int readers = ioctl(fd, 200);
   perror("get max ioctl");
   errno = 0;
 
   close(fd);
 
-  printf("Test 8. expected result: %lu\n", max_readers);
-  printf("Test 8. result: %d\n", readers);
+  printf("Test 7. expected result: %lu\n", max_readers);
+  printf("Test 7. result: %d\n", readers);
 
   if(readers != max_readers) return -1;
 
   return 0;
+}
+
+
+// TEST 8: If two processes try to grab the write permission
+// to a device one is getting rejected.
+int test_eight() {
+  int fd;
+  int pid = fork();
+
+  fd = open("/dev/dm510-0", O_WRONLY);
+  if(pid != 0) {
+    perror("parent open");
+
+    int status;
+    wait(&status);
+
+    if(WIFEXITED(status)) {
+      int status_code = WEXITSTATUS(status);
+      if(status_code == 0 || errno == 512) {
+        return 0;
+      }
+    }
+  } else {
+    perror("child open");
+    if(errno == 512) {
+      exit(0);
+    } else {
+      exit(-1);
+    }
+  }
+
+  return -1;
 }
 
 
@@ -181,23 +296,23 @@ int main(int argc, char const *argv[]) {
   // correctly, otherwise something did not work as expected
 
   printf("\n");
-  /* printf("TEST 1 ------------------\n");
+  printf("TEST 1 ------------------\n\n");
   if(test_one() == 0) {
     printf("\nTest Succeeded\n");
   } else {
     printf("\nTest Failed\n");
   }
-  printf("-------------------------\n\n");
+  printf("-------------------------\n\n"); 
 
-  printf("TEST 2 ------------------\n");
+  printf("TEST 2 ------------------\n\n");
   if(test_two() == 0) {
     printf("\nTest Succeeded\n");
   } else {
     printf("\nTest Failed\n");
   }
-  printf("-------------------------\n\n");
+  printf("-------------------------\n\n"); 
 
-  printf("TEST 3 ------------------\n");
+  printf("TEST 3 ------------------\n\n");
   if(test_three() == 0) {
     printf("\nTest Succeeded\n");
   } else {
@@ -205,43 +320,39 @@ int main(int argc, char const *argv[]) {
   }
   printf("-------------------------\n\n");
 
-  printf("TEST 4 ------------------\n");
+  printf("TEST 4 ------------------\n\n");
   if(test_four() == 0) {
     printf("\nTest Succeeded\n");
   } else {
     printf("\nTest Failed\n");
   }
   printf("-------------------------\n\n");
-  printf("\n"); */
 
-  /* printf("TEST 5 ------------------\n");
+  printf("TEST 5 ------------------\n\n");
   if(test_five() == 0) {
     printf("\nTest Succeeded\n");
   } else {
     printf("\nTest Failed\n");
   }
   printf("-------------------------\n\n");
-  printf("\n"); */
 
-  /* printf("TEST 6 ------------------\n");
+  printf("TEST 6 ------------------\n\n");
   if(test_six() == 0) {
     printf("\nTest Succeeded\n");
   } else {
     printf("\nTest Failed\n");
   }
   printf("-------------------------\n\n");
-  printf("\n");
 
-  printf("TEST 7 ------------------\n");
+  printf("TEST 7 ------------------\n\n");
   if(test_seven() == 0) {
     printf("\nTest Succeeded\n");
   } else {
     printf("\nTest Failed\n");
   }
   printf("-------------------------\n\n");
-  printf("\n");*/
 
-  printf("TEST 8 ------------------\n");
+  printf("TEST 8 ------------------\n\n");
   if(test_eight() == 0) {
     printf("\nTest Succeeded\n");
   } else {
